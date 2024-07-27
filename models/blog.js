@@ -38,14 +38,15 @@ var blogSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
-    image: {
-      type: String,
-      default: "",
-    },
+    // image: {
+    //   type: String,
+    //   default: "",
+    // },
     author: {
       type: String,
       default: "Admin",
     },
+    images: [],
   },
   {
     toJSON: {

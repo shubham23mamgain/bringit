@@ -88,6 +88,7 @@ const getAllBrand = asyncHandler(async (req, res) => {
     throw new Error(error);
   }
 });
+
 const getSingleBrand = asyncHandler(async (req, res) => {
   const { id } = req.params;
 

@@ -1,8 +1,10 @@
+const fs = require("fs");
 const Product = require("../models/product");
-
+const User = require("../models/user");
 const asyncHandler = require("express-async-handler");
 const validateMongodbID = require("../utils/validateMongodbID");
 const slugify = require("slugify");
+const cloudinaryUploadImg = require("../utils/cloudinary");
 
 const createProduct = asyncHandler(async (req, res) => {
   try {
@@ -186,10 +188,161 @@ const deleteProduct = asyncHandler(async (req, res) => {
   }
 });
 
+const addToWishlist = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+  const { prodId } = req.body;
+
+  try {
+    const user = await User.findById(_id);
+
+    const alreadyAdded = user.wishlist.find((id) => id.toString() === prodId);
+
+    if (alreadyAdded) {
+      let user = await User.findByIdAndUpdate(
+        _id,
+        {
+          $pull: { wishlist: prodId },
+        },
+        { new: true }
+      );
+
+      res.status(200).json({ message: "Removed from Wishlist" });
+    } else {
+      let user = await User.findByIdAndUpdate(
+        _id,
+        {
+          $push: { wishlist: prodId },
+        },
+        {
+          new: true,
+        }
+      );
+
+      res.status(200).json({ message: "Added to Wishllist" });
+    }
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+const rating = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+
+  const { star, prodId, comment } = req.body;
+
+  try {
+    const product = await Product.findById(prodId);
+
+    let alreadyRated = product.ratings.find(
+      (userId) => userId.postedBy.toString() === _id.toString()
+    );
+
+    if (alreadyRated) {
+      const updatedRating = await Product.updateOne(
+        {
+          ratings: { $elemMatch: alreadyRated },
+        },
+        { $set: { "ratings.$.star": star, "ratings.$.comment": comment } },
+        { new: true }
+      );
+
+      // res.status(200).json({ message: "Updated Rating", data: updatedRating });
+    } else {
+      const ratedProduct = await Product.findByIdAndUpdate(
+        prodId,
+        {
+          $push: {
+            ratings: {
+              star: star,
+              postedBy: _id,
+              comment: comment,
+            },
+          },
+        },
+        {
+          new: true,
+        }
+      );
+
+      // res
+      //   .status(200)
+      //   .json({ message: "Rated the product", data: ratedProduct });
+    }
+
+    const getAllRatings = await Product.findById(prodId);
+
+    let totalRatings = getAllRatings.ratings.length;
+    let ratingSum = getAllRatings.ratings
+      .map((item) => item.star)
+      .reduce((prev, curr) => prev + curr, 0);
+
+    let actualRating = ratingSum / totalRatings;
+
+    let finalProduct = await Product.findByIdAndUpdate(
+      prodId,
+      {
+        totalRatings: actualRating,
+      },
+      {
+        new: true,
+      }
+    );
+
+    res.status(200).json({ message: "Average Rating", data: finalProduct });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+const uploadImages = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  validateMongodbID(id);
+
+  try {
+    const uploader = (path) => cloudinaryUploadImg(path, "images");
+    const urls = [];
+
+    const files = req.files;
+
+    for (const file of files) {
+      const { path } = file;
+      const newPath = await uploader(path);
+
+      console.log("New path", newPath);
+      urls.push(newPath);
+
+      // console.log("Filew", file);
+      // fs.unlinkSync(path);
+    }
+
+    const findProduct = await Product.findByIdAndUpdate(
+      id,
+      {
+        images: urls.map((file) => {
+          return file;
+        }),
+      },
+      { new: true }
+    );
+
+    res.status(200).json({
+      message: "Images uploaded successfully",
+      data: findProduct,
+      success: true,
+    });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
 module.exports = {
   createProduct,
   getAllProducts,
   getSingleProduct,
   updateProduct,
   deleteProduct,
+  addToWishlist,
+  rating,
+  uploadImages,
 };
