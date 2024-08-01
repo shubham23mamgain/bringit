@@ -1,5 +1,7 @@
 const asyncHandler = require("express-async-handler");
 const User = require("../models/user");
+const Product = require("../models/product");
+const Cart = require("../models/cart");
 const { generateToken } = require("../config/jwtToken");
 const validateMongodbID = require("../utils/validateMongodbID");
 const { generateRefreshToken } = require("../config/refreshToken");
@@ -49,6 +51,42 @@ const loginUser = asyncHandler(async (req, res) => {
       mobile: findUser?.mobile,
       email: findUser?.email,
       token: generateToken(findUser?._id),
+    });
+  } else {
+    throw new Error("Invalid Crendentials");
+  }
+});
+
+const loginAdmin = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
+
+  const findAdmin = await User.findOne({ email });
+
+  if (findAdmin.role !== "admin") throw new Error("Not Authorized");
+  if (findAdmin && (await findAdmin.isPasswordMatched(password))) {
+    const refreshToken = await generateRefreshToken(findAdmin?._id);
+
+    const updateAdmin = await User.findByIdAndUpdate(
+      findAdmin.id,
+      {
+        refreshToken: refreshToken,
+      },
+      {
+        new: true,
+      }
+    );
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      maxAge: 72 * 60 * 60 * 1000,
+    });
+    res.status(200).json({
+      _id: findAdmin?._id,
+      firstname: findAdmin?.firstname,
+      lastname: findAdmin?.lastname,
+      mobile: findAdmin?.mobile,
+      email: findAdmin?.email,
+      token: generateToken(findAdmin?._id),
     });
   } else {
     throw new Error("Invalid Crendentials");
@@ -319,6 +357,138 @@ const resetPassword = asyncHandler(async (req, res) => {
   res.json({ message: "Password Resetted Successfully", data: user });
 });
 
+const getWishlist = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+
+  try {
+    const findUser = await User.findById(_id).populate("wishlist");
+
+    res.status(200).json(findUser);
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+const saveAddress = asyncHandler(async (req, res) => {
+  try {
+    const { _id } = req.user;
+    validateMongodbID(_id);
+
+    const updatedUser = await User.findByIdAndUpdate(
+      _id,
+      {
+        address: req?.body?.address,
+      },
+      {
+        new: true,
+      }
+    );
+
+    if (updatedUser == null) {
+      return res.status(404).json({
+        message: "User with Given ID not found",
+        success: false,
+      });
+    }
+
+    res.status(200).json({
+      message: "User address updated successfully ",
+      data: updatedUser,
+      success: true,
+    });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+const userCart = asyncHandler(async (req, res) => {
+  // console.log("User", req.user);
+  const { cart } = req.body;
+  const { _id } = req.user;
+
+  validateMongodbID(_id);
+  try {
+    let products = [];
+    const user = await User.findById(_id);
+
+    const alreadyExistsInCart = await Cart.findOne({ orderby: user._id });
+
+    // if (alreadyExistsInCart) {
+    //   alreadyExistsInCart.remove();
+    // }
+
+    for (let i = 0; i < cart.length; i++) {
+      let object = {};
+      object.product = cart[i]._id;
+      object.count = cart[i].count;
+      object.color = cart[i].color;
+
+      let getPrice = await Product.findById(cart[i]._id).select("price").exec();
+      object.price = getPrice.price;
+      products.push(object);
+
+      // console.log(products);
+    }
+
+    let cartTotal = 0;
+    for (let i = 0; i < products.length; i++) {
+      cartTotal = cartTotal + products[i].price * products[i].count;
+    }
+
+    // console.log("Products", products);
+    // console.log("Cart Total", cartTotal);
+
+    let newCart = await new Cart({
+      products,
+      cartTotal,
+      orderby: user?._id,
+    }).save();
+
+    res.json(newCart);
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+const getUserCart = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+  validateMongodbID(_id);
+
+  try {
+    const getCart = await Cart.findOne({ orderby: _id }).populate(
+      "products.product"
+      // "_id title price totalAfterDiscount"
+    );
+
+    res.status(200).json({
+      message: "User cart fetched successfully",
+      data: getCart,
+      success: true,
+    });
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
+const emptyCart = asyncHandler(async (req, res) => {
+  const { _id } = req.user;
+  validateMongodbID(_id);
+
+  try {
+    const user = await User.findOne({ _id });
+
+    // console.log(user);
+
+    const cart = await Cart.findOneAndDelete({ orderby: user._id });
+
+    console.log("Removed Cart", cart);
+
+    res.json(cart);
+  } catch (error) {
+    throw new Error(error);
+  }
+});
+
 module.exports = {
   registerUser,
   loginUser,
@@ -333,4 +503,10 @@ module.exports = {
   updatePassword,
   forgotPasswordToken,
   resetPassword,
+  loginAdmin,
+  getWishlist,
+  saveAddress,
+  userCart,
+  getUserCart,
+  emptyCart,
 };
